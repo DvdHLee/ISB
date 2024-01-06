@@ -1,0 +1,246 @@
+#INTRADAY SCALPING BACKTESTER (ISB)
+#!pip install _____
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objs as go
+import plotly.express as px
+import schedule
+import time
+import math
+
+#DATA--------------------------------------------------------------------------------------------
+data = yf.download(tickers='NVDA', start="2023-12-20", end="2023-12-21", interval='1m');
+
+#RSI (Simple)------------------------------------------------------------------------------------
+def getSimpleRSI():
+    
+    change = data['Close'].diff(1);
+    gain = change.copy();
+    loss = change.copy();
+    
+    gain[gain < 0] = 0;
+    loss[loss > 0] = 0;
+    
+    rsperiod = 14;
+    avggain = [];
+    avgloss = [];
+    rsi = [];
+    
+    for x in range(len(change)):
+        avggain.append(sum(gain[x - rsperiod:x]));
+        avgloss.append(sum(loss[x - rsperiod:x]));
+        
+        if (x < rsperiod):
+            avggain[x] = np.nan;
+            avgloss[x] = np.nan;
+    
+    for x in range(len(change)):
+        rs = avggain[x]/abs(avgloss[x]);
+        rsi.append(100 - (100/(1 + rs)));
+    
+    timedf = pd.DataFrame(data.index);
+    rsidf = pd.DataFrame(rsi);
+    rsigraphdf = pd.concat([timedf, rsidf], axis=1, join='inner');
+    fig = px.line(rsigraphdf, x="Datetime", y=0, title='RSI Graph');
+    fig.update_layout(yaxis_title="RSI")
+    #fig.show()
+    
+    return rsi;
+
+#Moving Average (Simple)-------------------------------------------------------------------------
+def getSimpleMA(p):
+    
+    MAperiod = p;
+    price = data['Open'];
+    
+    MA = [];
+    
+    for x in range(len(price)):
+        MA.append(sum(price[x - MAperiod:x])/MAperiod);
+        
+        if (x < MAperiod):
+            MA[x] = np.nan;
+            
+    return MA;
+
+#Standard Deviation------------------------------------------------------------------------------
+def getSD(p):
+    
+    SDperiod = p;
+    SMA = getSimpleMA(SDperiod);
+    closeprice = data['Close'];
+    
+    SD = [];
+    
+    for x in range(len(closeprice)):
+        step2 = closeprice[x - SDperiod:x];
+        step3 = [(a - SMA[x])**2 for a in step2];
+        
+        SD.append(math.sqrt(sum(step3)/SDperiod));
+        
+        if (x < SDperiod):
+            SD[x] = np.nan;
+    
+    return SD;
+
+#Backtester--------------------------------------------------------------------------------------
+time = data.index;
+rsi = getSimpleRSI();
+MA = getSimpleMA(9); #9 period SMA
+SD = getSD(20); #20 period Standard Deviation
+price = data['Open'];
+low = data['Low'];
+high = data['High'];
+PL = 0; #Profit/Loss
+inLongTrade = False;
+inShortTrade = False;
+entryPrice = 0;
+shares = 100; #Change as wanted
+profitLimit = 0.50; #Change as wanted
+lossStop = 0.50; #Change as wanted
+cooldown = 5; #5 min minimum between trades, #Change as wanted
+cd = 0; #cooldown counter
+
+for x in range(len(rsi)):
+    #Long Position
+    longcondition1 = (rsi[x] < 20); #Conditions to enter a trade, change as wanted
+    if (inLongTrade):
+        if (price[x] > entryPrice + profitLimit):
+            inLongTrade = False;
+            PL = PL + (profitLimit*shares);
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+        elif (low[x] < entryPrice - lossStop):
+            inLongTrade = False;
+            PL = PL - (lossStop*shares);
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+        elif (high[x] > entryPrice + profitLimit):
+            inLongTrade = False;
+            PL = PL + (profitLimit*shares);
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+    elif (not inLongTrade and longcondition1 and cd >= cooldown):
+        inLongTrade = True; #Enter Trade
+        entryPrice = price[x];
+        print();
+        print("Long Entry")
+        print(time[x])
+        print(entryPrice)
+        if (low[x] < entryPrice - lossStop):
+            PL = PL - (lossStop*shares);
+            inLongTrade = False;
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+        
+    #Short Position
+    shortcondition1 = (rsi[x] > 80); #Conditions to enter a trade, change as wanted
+    if (inShortTrade):
+        if (price[x] < entryPrice - profitLimit):
+            inShortTrade = False;
+            PL = PL + (profitLimit*shares);
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+        elif (high[x] > entryPrice + lossStop):
+            inShortTrade = False;
+            PL = PL - (lossStop*shares);
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+        elif (low[x] < entryPrice - profitLimit):
+            inShortTrade = False;
+            PL = PL + (profitLimit*shares);
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+    elif (not inShortTrade and shortcondition1 and cd >= cooldown):
+        inShortTrade = True; #Enter Trade
+        entryPrice = price[x];
+        print();
+        print("Short Entry")
+        print(time[x])
+        print(entryPrice)
+        if (high[x] > entryPrice + lossStop):
+            PL = PL - (lossStop*shares);
+            inShortTrade = False;
+            cd = 0;
+            print("Exit")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+            
+    cd += 1;
+    if ((x + 1) % 390 > 387): #Exit all trades at end of each day
+        if (inLongTrade):
+            inLongTrade = False;
+            PL = PL + ((price[x] - entryPrice)*shares);
+            print("Exit due to EOD")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+        elif (inShortTrade):
+            inShortTrade = False;
+            PL = PL - ((price[x] - entryPrice)*shares);
+            print("Exit due to EOD")
+            print(time[x])
+            print(price[x])
+            print("PL =", PL)
+            
+print()
+print("TOTAL PROFIT/LOSS =", PL)
+
+#PLOT------------------------------------------------------------------------------------------
+#Candlesticks
+data = yf.download(tickers='NVDA', period='1d', interval='1m')
+fig = go.Figure()
+
+#Candlesticks
+fig.add_trace(go.Candlestick(x=data.index,
+                            open=data['Open'],
+                            high=data['High'],
+                            low=data['Low'],
+                            close=data['Close'], name = 'market data'))
+fig.show()
+
+#RSI Graph
+fig2 = go.Figure(
+        data = [
+            go.Scatter(x=data.index, y=rsi, name="RSI")
+        ])
+fig2.add_hline(y=80, line_width=3, line_dash="dash", line_color="red") #Overbought Indicator
+fig2.add_hline(y=20, line_width=3, line_dash="dash", line_color="green") #Oversold Indicator
+
+#Add titles
+fig.update_layout(
+    title='NVDA Live Price',
+    yaxis_title="Stock Price")
+
+fig2.update_layout(
+    title='RSI',
+    yaxis_title="RSI")
+
+
+#TODO--------------------------------------------------------------------------------------------
+# - Wilder's?
+# - MACD?
